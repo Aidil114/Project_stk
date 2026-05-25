@@ -94,7 +94,7 @@ def load_bert():
         )
 
         bert_model = SentenceTransformer(
-            "paraphrase-multilingual-MiniLM-L12-v2",
+            "paraphrase-multilingual-MiniLM-L3-v2",
             device="cpu"
         )
 
@@ -380,7 +380,7 @@ def stats():
     return jsonify({
         'total_dokumen' : len(raw_data),
         'total_kata'    : len(thesaurus),
-        'bert_model'    : 'paraphrase-multilingual-MiniLM-L12-v2',
+        'bert_model'    : 'paraphrase-multilingual-MiniLM-L3-v2',
     })
 
 if __name__ == "__main__":
