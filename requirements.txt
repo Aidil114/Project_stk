@@ -1,0 +1,10 @@
+flask
+gunicorn
+pandas
+numpy
+scikit-learn
+sentence-transformers
+torch
+nltk
+sastrawi
+beautifulsoup4
