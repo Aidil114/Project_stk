@@ -32,7 +32,7 @@ print("✅ Total dokumen:", len(processed_paper))
 print("⏳ Loading model BERT L3...")
 
 model = SentenceTransformer(
-    "paraphrase-multilingual-MiniLM-L12-v2",
+    "sentence-transformers/all-MiniLM-L6-v2",
     device="cpu"
 )
 

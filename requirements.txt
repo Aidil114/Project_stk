@@ -4,6 +4,8 @@ pandas
 numpy
 scikit-learn
 sentence-transformers
+transformers
+huggingface_hub
 torch
 nltk
 sastrawi
