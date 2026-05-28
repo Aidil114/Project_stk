@@ -94,7 +94,7 @@ def load_bert():
         )
 
         bert_model = SentenceTransformer(
-            "paraphrase-multilingual-MiniLM-L3-v2",
+            "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
             device="cpu"
         )
 
