@@ -1,6 +1,7 @@
 """
 SISTEM TEMU KEMBALI INFORMASI
 Backend API - Flask
+FIX RAILWAY + BERT + NLTK
 """
 
 import os
@@ -27,22 +28,27 @@ from Sastrawi.StopWordRemover.StopWordRemoverFactory import (
     ArrayDictionary
 )
 
-from nltk.tokenize import word_tokenize
 import nltk
 
-# =========================
-# NLTK
-# =========================
-nltk.download('punkt', quiet=True)
+# ==========================================
+# DOWNLOAD NLTK
+# ==========================================
+try:
+    nltk.download('punkt', quiet=True)
+    nltk.download('punkt_tab', quiet=True)
+except:
+    print("NLTK download gagal")
 
-# =========================
-# Flask
-# =========================
+from nltk.tokenize import word_tokenize
+
+# ==========================================
+# FLASK
+# ==========================================
 app = Flask(__name__)
 
-# =========================
+# ==========================================
 # PREPROCESSING
-# =========================
+# ==========================================
 factory_sw = StopWordRemoverFactory()
 stop_words = factory_sw.get_stop_words()
 
@@ -65,9 +71,9 @@ extra_stopwords = {
     'hari','tahun','kata',
 }
 
-# =========================
+# ==========================================
 # DATA
-# =========================
+# ==========================================
 BASE_DIR = os.path.dirname(__file__)
 DATA_DIR = os.path.join(BASE_DIR, "data")
 
@@ -87,16 +93,16 @@ raw_data = df_mentah.to_dict("records")
 
 print("✅ Data berhasil dimuat")
 
-# =========================
-# BERT GLOBAL
-# =========================
+# ==========================================
+# GLOBAL BERT
+# ==========================================
 bert_model = None
 util = None
 bert_embeddings = None
 
-# =========================
+# ==========================================
 # LOAD BERT
-# =========================
+# ==========================================
 def load_bert():
 
     global bert_model
@@ -108,7 +114,7 @@ def load_bert():
 
     try:
 
-        print("⏳ Memuat model BERT...")
+        print("⏳ Loading BERT...")
 
         import torch
 
@@ -119,7 +125,6 @@ def load_bert():
             util as st_util
         )
 
-        # FIX MODEL
         bert_model = SentenceTransformer(
             "paraphrase-multilingual-MiniLM-L12-v2",
             device="cpu"
@@ -127,7 +132,7 @@ def load_bert():
 
         util = st_util
 
-        print("⏳ Memuat embedding BERT...")
+        print("⏳ Loading embeddings...")
 
         with open(
             os.path.join(DATA_DIR, "bert_embeddings.pkl"),
@@ -139,18 +144,18 @@ def load_bert():
         if hasattr(bert_embeddings, "cpu"):
             bert_embeddings = bert_embeddings.cpu()
 
-        print("✅ BERT berhasil dimuat")
+        print("✅ BERT Loaded")
 
     except Exception as e:
 
-        print("❌ BERT gagal:", e)
+        print("❌ BERT ERROR:", e)
 
         bert_model = None
         bert_embeddings = None
 
-# =========================
+# ==========================================
 # CLEAN TEXT
-# =========================
+# ==========================================
 def clean_text(text):
 
     text = str(text)
@@ -171,14 +176,19 @@ def clean_text(text):
 
     return text
 
-# =========================
+# ==========================================
 # TOKENIZE
-# =========================
+# ==========================================
 def tokenize(text):
 
     cleaned = clean_text(text)
 
-    tokens = word_tokenize(cleaned)
+    try:
+        tokens = word_tokenize(cleaned)
+
+    except:
+        # fallback jika nltk gagal
+        tokens = cleaned.split()
 
     filtered = [
         t for t in tokens
@@ -194,9 +204,9 @@ def tokenize(text):
         if len(t) > 2
     ]
 
-# =========================
+# ==========================================
 # PREPROCESS QUERY
-# =========================
+# ==========================================
 def preprocess_query(query_text):
 
     tokens = tokenize(query_text)
@@ -206,9 +216,9 @@ def preprocess_query(query_text):
         for t in tokens
     ]
 
-# =========================
-# SYNONYM
-# =========================
+# ==========================================
+# GET SYNONYM
+# ==========================================
 def get_synonym(word):
 
     try:
@@ -220,15 +230,20 @@ def get_synonym(word):
         content = urllib.request.urlopen(
             'http://www.sinonimkata.com/search.php',
             encoded_data,
-            timeout=5
+            timeout=3
         )
 
         soup = BeautifulSoup(content, 'html.parser')
 
-        synonym_tags = soup.find(
+        td = soup.find(
             'td',
             attrs={'width': '90%'}
-        ).find_all('a')
+        )
+
+        if td is None:
+            return [word]
+
+        synonym_tags = td.find_all('a')
 
         return [word] + [
             tag.getText()
@@ -238,9 +253,9 @@ def get_synonym(word):
     except:
         return [word]
 
-# =========================
+# ==========================================
 # QUERY EXPANSION
-# =========================
+# ==========================================
 def expand_query(tokens):
 
     list_synonym = []
@@ -248,6 +263,7 @@ def expand_query(tokens):
     for t in tokens:
 
         if t in thesaurus:
+
             list_synonym.append(
                 thesaurus[t][:3]
             )
@@ -277,9 +293,9 @@ def expand_query(tokens):
 
     return expanded
 
-# =========================
-# TFIDF
-# =========================
+# ==========================================
+# TFIDF SEARCH
+# ==========================================
 def search_tfidf(query_tokens, top_n=10):
 
     vectorizer = TfidfVectorizer(use_idf=True)
@@ -313,9 +329,9 @@ def search_tfidf(query_tokens, top_n=10):
         reverse=True
     )[:top_n]
 
-# =========================
-# TFIDF QE
-# =========================
+# ==========================================
+# TFIDF EXPANDED
+# ==========================================
 def search_tfidf_expanded(tokens, top_n=10):
 
     expanded = expand_query(tokens)
@@ -362,9 +378,9 @@ def search_tfidf_expanded(tokens, top_n=10):
         reverse=True
     )[:top_n]
 
-# =========================
+# ==========================================
 # BERT SEARCH
-# =========================
+# ==========================================
 def search_bert(query_text, top_n=10):
 
     global bert_model
@@ -405,9 +421,9 @@ def search_bert(query_text, top_n=10):
 
     return results
 
-# =========================
+# ==========================================
 # HYBRID SEARCH
-# =========================
+# ==========================================
 def hybrid_search(query_text, top_n=10, alpha=0.5):
 
     tokens = preprocess_query(query_text)
@@ -423,7 +439,6 @@ def hybrid_search(query_text, top_n=10, alpha=0.5):
     )
 
     if not bert_res:
-
         return tfidf_res[:top_n]
 
     tfidf_map = {
@@ -485,9 +500,9 @@ def hybrid_search(query_text, top_n=10, alpha=0.5):
         reverse=True
     )[:top_n]
 
-# =========================
+# ==========================================
 # FORMAT RESULT
-# =========================
+# ==========================================
 def format_results(results, method='hybrid'):
 
     output = []
@@ -531,85 +546,92 @@ def format_results(results, method='hybrid'):
 
     return output
 
-# =========================
-# ROUTE
-# =========================
+# ==========================================
+# HOME
+# ==========================================
 @app.route('/')
 def index():
-
     return render_template('index.html')
 
-# =========================
+# ==========================================
 # API SEARCH
-# =========================
+# ==========================================
 @app.route('/api/search', methods=['POST'])
 def search():
 
-    data = request.get_json()
+    try:
 
-    query = data.get('query', '').strip()
+        data = request.get_json()
 
-    method = data.get('method', 'hybrid')
+        query = data.get('query', '').strip()
 
-    top_n = int(
-        data.get('top_n', 5)
-    )
+        method = data.get('method', 'hybrid')
 
-    if not query:
+        top_n = int(
+            data.get('top_n', 5)
+        )
+
+        if not query:
+
+            return jsonify({
+                'error': 'Query kosong'
+            }), 400
+
+        tokens = preprocess_query(query)
+
+        if method == 'tfidf':
+
+            results = search_tfidf(
+                tokens,
+                top_n=top_n
+            )
+
+        elif method == 'tfidf_expanded':
+
+            results = search_tfidf_expanded(
+                tokens,
+                top_n=top_n
+            )
+
+        elif method == 'bert':
+
+            results = search_bert(
+                query,
+                top_n=top_n
+            )
+
+        else:
+
+            results = hybrid_search(
+                query,
+                top_n=top_n
+            )
 
         return jsonify({
-            'error': 'Query kosong'
-        }), 400
 
-    tokens = preprocess_query(query)
+            'query': query,
 
-    if method == 'tfidf':
+            'method': method,
 
-        results = search_tfidf(
-            tokens,
-            top_n=top_n
-        )
+            'tokens': tokens,
 
-    elif method == 'tfidf_expanded':
+            'total': len(results),
 
-        results = search_tfidf_expanded(
-            tokens,
-            top_n=top_n
-        )
+            'results': format_results(
+                results,
+                method
+            ),
+        })
 
-    elif method == 'bert':
+    except Exception as e:
 
-        results = search_bert(
-            query,
-            top_n=top_n
-        )
+        return jsonify({
+            "error": str(e)
+        }), 500
 
-    else:
-
-        results = hybrid_search(
-            query,
-            top_n=top_n
-        )
-
-    return jsonify({
-
-        'query': query,
-
-        'method': method,
-
-        'tokens': tokens,
-
-        'total': len(results),
-
-        'results': format_results(
-            results,
-            method
-        ),
-    })
-
-# =========================
+# ==========================================
 # STATS
-# =========================
+# ==========================================
 @app.route('/api/stats')
 def stats():
 
@@ -623,9 +645,9 @@ def stats():
             'paraphrase-multilingual-MiniLM-L12-v2',
     })
 
-# =========================
+# ==========================================
 # MAIN
-# =========================
+# ==========================================
 if __name__ == "__main__":
 
     port = int(
