@@ -4,73 +4,99 @@ Backend API - Flask
 """
 
 import os
-
-from flask import Flask, request, jsonify, render_template
-import pandas as pd
-import numpy as np
-import pickle
 import re
-import string
+import pickle
 import itertools
-import os
 import urllib.parse
 import urllib.request
+
+import pandas as pd
+import numpy as np
+
+from flask import Flask, request, jsonify, render_template
+
 from bs4 import BeautifulSoup
+
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+
 from Sastrawi.Stemmer.StemmerFactory import StemmerFactory
 from Sastrawi.StopWordRemover.StopWordRemoverFactory import (
-    StopWordRemoverFactory, StopWordRemover, ArrayDictionary
+    StopWordRemoverFactory,
+    StopWordRemover,
+    ArrayDictionary
 )
+
 from nltk.tokenize import word_tokenize
 import nltk
 
+# =========================
+# NLTK
+# =========================
 nltk.download('punkt', quiet=True)
-nltk.download('punkt_tab', quiet=True)
 
+# =========================
+# Flask
+# =========================
 app = Flask(__name__)
 
-# ── Inisialisasi tools preprocessing ────────────────────────
-factory_sw       = StopWordRemoverFactory()
-stop_words       = factory_sw.get_stop_words()
-dictionary       = ArrayDictionary(stop_words)
+# =========================
+# PREPROCESSING
+# =========================
+factory_sw = StopWordRemoverFactory()
+stop_words = factory_sw.get_stop_words()
+
+dictionary = ArrayDictionary(stop_words)
+
 stopword_remover = StopWordRemover(dictionary)
-stemmer          = StemmerFactory().create_stemmer()
+
+stemmer = StemmerFactory().create_stemmer()
 
 extra_stopwords = {
-    'itu','ini','yang','dan','di','ke','dari','pada','untuk','dengan',
-    'adalah','juga','sudah','telah','akan','bisa','ada','tidak','lebih',
-    'saat','oleh','karena','bahwa','kami','kita','mereka','nya','kan',
-    'lah','pun','tapi','atau','jika','bila','serta','hingga','antara',
-    'yakni','yaitu','tersebut','seperti','menjadi','dalam','namun',
-    'sehingga','ketika','setelah','sebelum','agar','sangat','hanya',
-    'masih','sedang','baru','semua','para','atas','bawah','lain',
-    'sebuah','seorang','setiap','pula','juga','hari','tahun','kata',
+    'itu','ini','yang','dan','di','ke','dari','pada','untuk',
+    'dengan','adalah','juga','sudah','telah','akan','bisa',
+    'ada','tidak','lebih','saat','oleh','karena','bahwa',
+    'kami','kita','mereka','nya','kan','lah','pun','tapi',
+    'atau','jika','bila','serta','hingga','antara','yakni',
+    'yaitu','tersebut','seperti','menjadi','dalam','namun',
+    'sehingga','ketika','setelah','sebelum','agar','sangat',
+    'hanya','masih','sedang','baru','semua','para','atas',
+    'bawah','lain','sebuah','seorang','setiap','pula',
+    'hari','tahun','kata',
 }
 
-DATA_DIR = os.path.join(os.path.dirname(__file__), 'data')
+# =========================
+# DATA
+# =========================
+BASE_DIR = os.path.dirname(__file__)
+DATA_DIR = os.path.join(BASE_DIR, "data")
 
-# ── Load semua data & model ──────────────────────────────────
-print("⏳ Memuat data dan model...")
+print("⏳ Memuat data...")
 
-with open(os.path.join(DATA_DIR, 'processed_paper.pkl'), 'rb') as f:
+with open(os.path.join(DATA_DIR, "processed_paper.pkl"), "rb") as f:
     processed_paper = pickle.load(f)
 
-with open(os.path.join(DATA_DIR, 'thesaurus.pkl'), 'rb') as f:
+with open(os.path.join(DATA_DIR, "thesaurus.pkl"), "rb") as f:
     thesaurus = pickle.load(f)
 
+df_mentah = pd.read_csv(
+    os.path.join(DATA_DIR, "1_data_mentah.csv")
+)
 
+raw_data = df_mentah.to_dict("records")
 
-df_mentah = pd.read_csv(os.path.join(DATA_DIR, '1_data_mentah.csv'))
-raw_data  = df_mentah.to_dict('records')
+print("✅ Data berhasil dimuat")
 
-print("✅ Data berhasil dimuat!")
-
+# =========================
+# BERT GLOBAL
+# =========================
 bert_model = None
 util = None
 bert_embeddings = None
 
-
+# =========================
+# LOAD BERT
+# =========================
 def load_bert():
 
     global bert_model
@@ -93,32 +119,27 @@ def load_bert():
             util as st_util
         )
 
+        # FIX MODEL
         bert_model = SentenceTransformer(
-            "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+            "paraphrase-multilingual-MiniLM-L12-v2",
             device="cpu"
         )
 
         util = st_util
 
-        print("⏳ Memuat embedding...")
+        print("⏳ Memuat embedding BERT...")
 
         with open(
-            os.path.join(
-                DATA_DIR,
-                "bert_embeddings.pkl"
-            ),
+            os.path.join(DATA_DIR, "bert_embeddings.pkl"),
             "rb"
         ) as f:
 
             bert_embeddings = pickle.load(f)
 
-        if hasattr(
-            bert_embeddings,
-            "cpu"
-        ):
+        if hasattr(bert_embeddings, "cpu"):
             bert_embeddings = bert_embeddings.cpu()
 
-        print("✅ BERT siap")
+        print("✅ BERT berhasil dimuat")
 
     except Exception as e:
 
@@ -127,87 +148,225 @@ def load_bert():
         bert_model = None
         bert_embeddings = None
 
-
-# ── Fungsi preprocessing ────────────────────────────────────
+# =========================
+# CLEAN TEXT
+# =========================
 def clean_text(text):
+
     text = str(text)
-    text = re.sub(r'ADVERTISEMENT GULIR UNTUK LANJUT BACA', '', text)
+
+    text = re.sub(
+        r'ADVERTISEMENT GULIR UNTUK LANJUT BACA',
+        '',
+        text
+    )
+
     text = text.lower()
+
     text = re.sub(r'http\S+', ' ', text)
+
     text = re.sub(r'[^a-z\s]', ' ', text)
+
     text = re.sub(r'\s+', ' ', text).strip()
+
     return text
 
+# =========================
+# TOKENIZE
+# =========================
 def tokenize(text):
-    cleaned  = clean_text(text)
-    tokens   = word_tokenize(cleaned)
-    filtered = [t for t in tokens if len(t) > 2 and t not in extra_stopwords]
-    joined   = stopword_remover.remove(' '.join(filtered))
-    return [t for t in joined.split() if len(t) > 2]
 
+    cleaned = clean_text(text)
+
+    tokens = word_tokenize(cleaned)
+
+    filtered = [
+        t for t in tokens
+        if len(t) > 2 and t not in extra_stopwords
+    ]
+
+    joined = stopword_remover.remove(
+        ' '.join(filtered)
+    )
+
+    return [
+        t for t in joined.split()
+        if len(t) > 2
+    ]
+
+# =========================
+# PREPROCESS QUERY
+# =========================
 def preprocess_query(query_text):
-    tokens = tokenize(query_text)
-    return [stemmer.stem(t) for t in tokens]
 
+    tokens = tokenize(query_text)
+
+    return [
+        stemmer.stem(t)
+        for t in tokens
+    ]
+
+# =========================
+# SYNONYM
+# =========================
 def get_synonym(word):
+
     try:
-        data         = {'q': word}
+
+        data = {'q': word}
+
         encoded_data = urllib.parse.urlencode(data).encode('utf-8')
-        content      = urllib.request.urlopen(
-                           'http://www.sinonimkata.com/search.php',
-                           encoded_data, timeout=5)
-        soup         = BeautifulSoup(content, 'html.parser')
-        synonym_tags = soup.find('td', attrs={'width': '90%'}).find_all('a')
-        return [word] + [tag.getText() for tag in synonym_tags]
-    except Exception:
+
+        content = urllib.request.urlopen(
+            'http://www.sinonimkata.com/search.php',
+            encoded_data,
+            timeout=5
+        )
+
+        soup = BeautifulSoup(content, 'html.parser')
+
+        synonym_tags = soup.find(
+            'td',
+            attrs={'width': '90%'}
+        ).find_all('a')
+
+        return [word] + [
+            tag.getText()
+            for tag in synonym_tags
+        ]
+
+    except:
         return [word]
 
+# =========================
+# QUERY EXPANSION
+# =========================
 def expand_query(tokens):
+
     list_synonym = []
+
     for t in tokens:
+
         if t in thesaurus:
-            list_synonym.append(thesaurus[t][:3])
+            list_synonym.append(
+                thesaurus[t][:3]
+            )
+
         else:
+
             syn = get_synonym(t)
+
             thesaurus[t] = syn
-            list_synonym.append(syn[:3])
+
+            list_synonym.append(
+                syn[:3]
+            )
+
     expanded = []
+
     for combo in itertools.product(*list_synonym):
-        stemmed = [stemmer.stem(w) for w in combo]
-        expanded.append(' '.join(stemmed))
+
+        stemmed = [
+            stemmer.stem(w)
+            for w in combo
+        ]
+
+        expanded.append(
+            ' '.join(stemmed)
+        )
+
     return expanded
 
-
-# ── Fungsi pencarian ────────────────────────────────────────
+# =========================
+# TFIDF
+# =========================
 def search_tfidf(query_tokens, top_n=10):
-    vectorizer = TfidfVectorizer(use_idf=True)
-    query_str  = ' '.join(query_tokens)
-    all_docs   = [query_str] + processed_paper
-    tfidf_mat  = vectorizer.fit_transform(all_docs)
-    scores     = cosine_similarity(tfidf_mat[0], tfidf_mat[1:]).flatten()
-    results = [{'doc_idx': i, 'score': float(s), 'query': query_str}
-               for i, s in enumerate(scores) if s > 0]
-    return sorted(results, key=lambda x: x['score'], reverse=True)[:top_n]
 
+    vectorizer = TfidfVectorizer(use_idf=True)
+
+    query_str = ' '.join(query_tokens)
+
+    all_docs = [query_str] + processed_paper
+
+    tfidf_mat = vectorizer.fit_transform(all_docs)
+
+    scores = cosine_similarity(
+        tfidf_mat[0],
+        tfidf_mat[1:]
+    ).flatten()
+
+    results = []
+
+    for i, s in enumerate(scores):
+
+        if s > 0:
+
+            results.append({
+                'doc_idx': i,
+                'score': float(s),
+                'query': query_str
+            })
+
+    return sorted(
+        results,
+        key=lambda x: x['score'],
+        reverse=True
+    )[:top_n]
+
+# =========================
+# TFIDF QE
+# =========================
 def search_tfidf_expanded(tokens, top_n=10):
-    expanded   = expand_query(tokens)
-    vectorizer = TfidfVectorizer(use_idf=True)
-    score_map  = {}
-    best_query = {}
-    for q_str in expanded:
-        all_docs  = [q_str] + processed_paper
-        tfidf_mat = vectorizer.fit_transform(all_docs)
-        scores    = cosine_similarity(tfidf_mat[0], tfidf_mat[1:]).flatten()
-        for i, s in enumerate(scores):
-            if s > score_map.get(i, 0):
-                score_map[i]  = float(s)
-                best_query[i] = q_str
-    results = [{'doc_idx': k, 'score': v, 'query': best_query[k]}
-               for k, v in score_map.items() if v > 0]
-    return sorted(results, key=lambda x: x['score'], reverse=True)[:top_n]
 
+    expanded = expand_query(tokens)
+
+    vectorizer = TfidfVectorizer(use_idf=True)
+
+    score_map = {}
+    best_query = {}
+
+    for q_str in expanded:
+
+        all_docs = [q_str] + processed_paper
+
+        tfidf_mat = vectorizer.fit_transform(all_docs)
+
+        scores = cosine_similarity(
+            tfidf_mat[0],
+            tfidf_mat[1:]
+        ).flatten()
+
+        for i, s in enumerate(scores):
+
+            if s > score_map.get(i, 0):
+
+                score_map[i] = float(s)
+
+                best_query[i] = q_str
+
+    results = []
+
+    for k, v in score_map.items():
+
+        if v > 0:
+
+            results.append({
+                'doc_idx': k,
+                'score': v,
+                'query': best_query[k]
+            })
+
+    return sorted(
+        results,
+        key=lambda x: x['score'],
+        reverse=True
+    )[:top_n]
+
+# =========================
+# BERT SEARCH
+# =========================
 def search_bert(query_text, top_n=10):
-    
+
     global bert_model
     global util
     global bert_embeddings
@@ -222,31 +381,35 @@ def search_bert(query_text, top_n=10):
 
     q_emb = bert_model.encode(
         clean_text(query_text),
-        convert_to_tensor=False
+        convert_to_tensor=True
     )
 
     scores = util.cos_sim(
-    q_emb,
-    bert_embeddings
-)[0]
+        q_emb,
+        bert_embeddings
+    )[0]
 
-    if hasattr(scores, "numpy"):
-        scores = scores.numpy()
+    scores = scores.cpu().numpy()
 
     ranked = np.argsort(-scores)
 
-    return [
-        {
+    results = []
+
+    for i in ranked[:top_n]:
+
+        results.append({
             "doc_idx": int(i),
             "score": float(scores[i]),
             "query": query_text
-        }
-        for i in ranked[:top_n]
-    ]
-    
+        })
 
+    return results
+
+# =========================
+# HYBRID SEARCH
+# =========================
 def hybrid_search(query_text, top_n=10, alpha=0.5):
-    
+
     tokens = preprocess_query(query_text)
 
     tfidf_res = search_tfidf_expanded(
@@ -254,15 +417,13 @@ def hybrid_search(query_text, top_n=10, alpha=0.5):
         top_n=len(processed_paper)
     )
 
-    try:
-        bert_res = search_bert(
-            query_text,
-            top_n=len(processed_paper)
-        )
-    except:
-        bert_res = []
+    bert_res = search_bert(
+        query_text,
+        top_n=len(processed_paper)
+    )
 
     if not bert_res:
+
         return tfidf_res[:top_n]
 
     tfidf_map = {
@@ -299,18 +460,21 @@ def hybrid_search(query_text, top_n=10, alpha=0.5):
             / max_bert
         )
 
+        final_score = (
+            alpha * s_bert
+            +
+            (1 - alpha) * s_tfidf
+        )
+
         combined.append({
+
             "doc_idx": idx,
-            "score":
-                alpha*s_bert
-                +
-                (1-alpha)*s_tfidf,
 
-            "bert_score":
-                round(s_bert,4),
+            "score": round(final_score, 4),
 
-            "tfidf_score":
-                round(s_tfidf,4),
+            "bert_score": round(s_bert, 4),
+
+            "tfidf_score": round(s_tfidf, 4),
 
             "query": query_text
         })
@@ -321,67 +485,154 @@ def hybrid_search(query_text, top_n=10, alpha=0.5):
         reverse=True
     )[:top_n]
 
+# =========================
+# FORMAT RESULT
+# =========================
 def format_results(results, method='hybrid'):
+
     output = []
+
     for rank, r in enumerate(results, 1):
+
         idx = r['doc_idx']
+
         doc = raw_data[idx]
+
         item = {
-            'rank'   : rank,
-            'score'  : round(r['score'], 4),
-            'judul'  : doc.get('judul', ''),
-            'url'    : doc.get('url', ''),
-            'isi'    : str(doc.get('isi', ''))[:300] + '...',
-            'no'     : doc.get('no', idx + 1),
+
+            'rank': rank,
+
+            'score': round(r['score'], 4),
+
+            'judul': doc.get('judul', ''),
+
+            'url': doc.get('url', ''),
+
+            'isi': str(
+                doc.get('isi', '')
+            )[:300] + '...',
+
+            'no': doc.get('no', idx + 1),
         }
+
         if method == 'hybrid':
-            item['bert_score']  = r.get('bert_score', 0)
-            item['tfidf_score'] = r.get('tfidf_score', 0)
+
+            item['bert_score'] = r.get(
+                'bert_score',
+                0
+            )
+
+            item['tfidf_score'] = r.get(
+                'tfidf_score',
+                0
+            )
+
         output.append(item)
+
     return output
 
-
-# ── Routes ───────────────────────────────────────────────────
+# =========================
+# ROUTE
+# =========================
 @app.route('/')
 def index():
+
     return render_template('index.html')
 
+# =========================
+# API SEARCH
+# =========================
 @app.route('/api/search', methods=['POST'])
 def search():
-    data   = request.get_json()
-    query  = data.get('query', '').strip()
+
+    data = request.get_json()
+
+    query = data.get('query', '').strip()
+
     method = data.get('method', 'hybrid')
-    top_n  = int(data.get('top_n', 5))
+
+    top_n = int(
+        data.get('top_n', 5)
+    )
 
     if not query:
-        return jsonify({'error': 'Query tidak boleh kosong'}), 400
+
+        return jsonify({
+            'error': 'Query kosong'
+        }), 400
 
     tokens = preprocess_query(query)
 
     if method == 'tfidf':
-        results = search_tfidf(tokens, top_n=top_n)
+
+        results = search_tfidf(
+            tokens,
+            top_n=top_n
+        )
+
     elif method == 'tfidf_expanded':
-        results = search_tfidf_expanded(tokens, top_n=top_n)
+
+        results = search_tfidf_expanded(
+            tokens,
+            top_n=top_n
+        )
+
     elif method == 'bert':
-        results = search_bert(query, top_n=top_n)
+
+        results = search_bert(
+            query,
+            top_n=top_n
+        )
+
     else:
-        results = hybrid_search(query, top_n=top_n)
+
+        results = hybrid_search(
+            query,
+            top_n=top_n
+        )
 
     return jsonify({
-        'query'          : query,
-        'method'         : method,
-        'tokens'         : tokens,
-        'total'          : len(results),
-        'results'        : format_results(results, method),
+
+        'query': query,
+
+        'method': method,
+
+        'tokens': tokens,
+
+        'total': len(results),
+
+        'results': format_results(
+            results,
+            method
+        ),
     })
 
+# =========================
+# STATS
+# =========================
 @app.route('/api/stats')
 def stats():
+
     return jsonify({
-        'total_dokumen' : len(raw_data),
-        'total_kata'    : len(thesaurus),
-        'bert_model'    : 'paraphrase-multilingual-MiniLM-L3-v2',
+
+        'total_dokumen': len(raw_data),
+
+        'total_kata': len(thesaurus),
+
+        'bert_model':
+            'paraphrase-multilingual-MiniLM-L12-v2',
     })
 
+# =========================
+# MAIN
+# =========================
 if __name__ == "__main__":
-    app.run()
+
+    port = int(
+        os.environ.get("PORT", 5000)
+    )
+
+    app.run(
+        host="0.0.0.0",
+        port=port
+    )
