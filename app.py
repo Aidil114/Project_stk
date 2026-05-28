@@ -39,7 +39,7 @@ try:
 except:
     print("NLTK download gagal")
 
-from nltk.tokenize import word_tokenize
+# ========================================== # SIMPLE TOKENIZER # ========================================== # NLTK DIHAPUS AGAR STABIL DI RAILWAY
 
 # ==========================================
 # FLASK
@@ -183,12 +183,8 @@ def tokenize(text):
 
     cleaned = clean_text(text)
 
-    try:
-        tokens = word_tokenize(cleaned)
-
-    except:
-        # fallback jika nltk gagal
-        tokens = cleaned.split()
+    # tokenizer manual tanpa nltk
+    tokens = cleaned.split()
 
     filtered = [
         t for t in tokens
@@ -203,6 +199,7 @@ def tokenize(text):
         t for t in joined.split()
         if len(t) > 2
     ]
+
 
 # ==========================================
 # PREPROCESS QUERY
